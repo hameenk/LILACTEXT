@@ -12,7 +12,7 @@ class DatabaseHelper {
     final dbPath = await getDatabasesPath();
     return openDatabase(
       join(dbPath, 'expenzia.db'),
-      version: 2,
+      version: 3,
       onCreate: (db, version) async {
         await db.execute('''CREATE TABLE transactions (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -20,12 +20,31 @@ class DatabaseHelper {
           name TEXT NOT NULL,
           category TEXT NOT NULL,
           amount REAL NOT NULL,
-          date TEXT NOT NULL
+          date TEXT NOT NULL,
+          note TEXT NOT NULL DEFAULT ''
         )''');
         await _createCreditsTable(db);
       },
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) await _createCreditsTable(db);
+        if (oldVersion < 3) {
+          final tableExists = await db.rawQuery(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='transactions'",
+          );
+          if (tableExists.isNotEmpty) {
+            final hasNoteColumn = await db.rawQuery(
+              "PRAGMA table_info(transactions)",
+            );
+            final hasNote = hasNoteColumn.any(
+              (column) => (column['name'] as String?) == 'note',
+            );
+            if (!hasNote) {
+              await db.execute(
+                "ALTER TABLE transactions ADD COLUMN note TEXT NOT NULL DEFAULT ''",
+              );
+            }
+          }
+        }
       },
     );
   }
@@ -84,11 +103,25 @@ class DatabaseHelper {
   Future<int> deleteCredit(int id) async =>
       (await database).delete('credits', where: 'id = ?', whereArgs: [id]);
 
-  Future<void> insertTransaction(ExpenseTransaction expenseTransaction) async {}
+  Future<int> insertTransaction(ExpenseTransaction expenseTransaction) async =>
+      (await database).insert('transactions', expenseTransaction.toMap());
 
-  Future<void> updateTransaction(ExpenseTransaction expenseTransaction) async {}
+  Future<int> updateTransaction(ExpenseTransaction expenseTransaction) async =>
+      (await database).update(
+        'transactions',
+        expenseTransaction.toMap()..remove('id'),
+        where: 'id = ?',
+        whereArgs: [expenseTransaction.id],
+      );
 
-  getTransactions() {}
+  Future<List<ExpenseTransaction>> getTransactions() async {
+    final rows = await (await database).query(
+      'transactions',
+      orderBy: 'date DESC, id DESC',
+    );
+    return rows.map(ExpenseTransaction.fromMap).toList();
+  }
 
-  Future<void> deleteTransaction(int i) async {}
+  Future<int> deleteTransaction(int id) async =>
+      (await database).delete('transactions', where: 'id = ?', whereArgs: [id]);
 }
